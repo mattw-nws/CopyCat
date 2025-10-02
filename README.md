@@ -80,14 +80,13 @@ It accepts two inputs, `catchment_num` and `feature_id`, both integers. Only one
                             "name": "bmi_python",
                             "params": {
                                 "name": "bmi_python",
-                                "model_type_name": "copycat",
+                                "model_type_name": "copycatbmi.CopyCat",
                                 "library_file": "/dmod/shared_libs/libsurfacebmi.so",
                                 "forcing_file": "",
                                 "uses_forcing_file": false,
                                 "init_config": "./config/copycat.yaml",
                                 "allow_exceed_end_time": true,
-                                "main_output_variable": "Q",
-                                ""
+                                "main_output_variable": "Q"
                             }
                         }
                     ]

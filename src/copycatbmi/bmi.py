@@ -25,7 +25,7 @@ from .base import BmiBase
 logger = logging.getLogger(__name__)
 
 
-class copycat(BmiBase):
+class CopyCat(BmiBase):
 
     def __init__(self) -> None:
         self._timestep: int = 0
