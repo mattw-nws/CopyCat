@@ -77,6 +77,8 @@ class CopyCat(BmiBase):
 
         self._q = 0.0
         self._qvar = np.array([self._q], dtype=np.float32)
+        self._fidvar = np.array([self._q], dtype=np.int64)
+        self._cnumvar = np.array([self._q], dtype=np.int64)
         
     def update(self) -> None:
         self.update_until(self._tN + 3600)
@@ -108,20 +110,28 @@ class CopyCat(BmiBase):
     def get_value_ptr(self, name: str) -> NDArray[Any]:
         if name == 'Q':
             return self._qvar
+        if name == 'feature_id':
+            return self._fidvar
+        if name == 'catchment_num':
+            return self._cnumvar
         else:
             raise RuntimeError(f"Unknown variable '{name}'")
 
     def get_var_units(self, name: str) -> str:
         if name == 'Q':
             return 'm^3/s'
+        if name == 'feature_id' or name == 'catchment_num':
+            return 'm/m'
         else:
             raise RuntimeError(f"Unknown variable '{name}'")
 
     def set_value(self, name: str, src: NDArray[Any]) -> None:
         if name == 'feature_id':
             self._feature_id = int(src[0])
+            self._fidvar[0] = self._feature_id
         if name == 'catchment_num':
             self._feature_id = self._get_xw_catchment(int(src[0]))
+            self._cnumvar[0] = int(src[0])
         else:
             pass #ignore
 
@@ -153,7 +163,7 @@ class CopyCat(BmiBase):
             return
         try:
             with open(self._cache_dir/'leader.id', "a") as f:
-                fcntl.lockf(f, fcntl.LOCK_UN | fcntl.LOCK_NB) # Release exclusive lock
+                fcntl.flock(f, fcntl.LOCK_UN) # Release exclusive lock
                 self._is_leader = False
                 return
         except Exception as e:
@@ -240,13 +250,13 @@ class CopyCat(BmiBase):
         return 'CopyCat'
     
     def get_input_item_count(self) -> int:
-        return 2
+        return len(self.get_input_var_names())
 
     def get_output_item_count(self) -> int:
-        return 1
+        return len(self.get_output_var_names())
 
     def get_input_var_names(self) -> tuple[str, ...]:
-        return ('feature_id','catchment_number')
+        return ()
 
     def get_output_var_names(self) -> tuple[str, ...]:
         return ('Q',)

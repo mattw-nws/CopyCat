@@ -42,54 +42,26 @@ cache_dir: /tmp/copycat
 
 Generally, CopyCat will be used for specific catchments within a NextGen realization, as in the example fragment below. CopyCat currently only provides one output variable: `Q`, in m^3/s.
 
-It accepts two inputs, `catchment_num` and `feature_id`, both integers. Only one of these inputs is expected to be provided, if both are provided the behavior is *undefined*. `catchment_num` is provided as input, you must configure the `crosswalk` location in the config file. Generally, and for simplicity, these inputs will be provided within the realization config using the SLoTH module. (Other means to specify these values may be provided in the future if performance gains warrant it.)
+It accepts two inputs, `catchment_num` and `feature_id`, both integers. Only one of these inputs is expected to be provided, if both are provided the behavior is *undefined*. `catchment_num` is provided as input, you must configure the `crosswalk` location in the config file. Generally, and for simplicity, these inputs will be provided within the realization config via the `model_params` mechanism.
 
+Example realization config fragment:
 ```
 ...
     "catchments": {
         "cat-2164301": {
             "formulations": [{
-                "name": "bmi_multi",
+                "name": "bmi_python",
                 "params": {
-                    "name": "bmi_multi",
-                    "model_type_name": "bmi_multi",
-                    "main_output_variable": "Q_OUT",
-                    "forcing_file": "",
+                    "name": "bmi_python",
+                    "python_type": "copycatbmi.CopyCat",
+                    "model_type_name": "CopyCat",
+                    "model_params": {
+                        "feature_id": 538737
+                    },
                     "uses_forcing_file": false,
-                    "init_config": "",
+                    "init_config": "./config/copycat_config.yaml",
                     "allow_exceed_end_time": true,
-                    "modules": [
-                        {
-                            "name": "bmi_c++",
-                            "params": {
-                                "name": "bmi_c++",
-                                "model_type_name": "SLoTH",
-                                "main_output_variable": "z",
-                                "init_config": "/dev/null",
-                                "allow_exceed_end_time": true,
-                                "fixed_time_step": false,
-                                "uses_forcing_file": false,
-                                "model_params": {
-                                    "catchment_num(1,long,1,node)": 2164301
-                                },
-                                "library_file": "/dmod/shared_libs/libslothmodel.so",
-                                "registration_function": "none"
-                            }
-                        },
-                        {
-                            "name": "bmi_python",
-                            "params": {
-                                "name": "bmi_python",
-                                "model_type_name": "copycatbmi.CopyCat",
-                                "library_file": "/dmod/shared_libs/libsurfacebmi.so",
-                                "forcing_file": "",
-                                "uses_forcing_file": false,
-                                "init_config": "./config/copycat.yaml",
-                                "allow_exceed_end_time": true,
-                                "main_output_variable": "Q"
-                            }
-                        }
-                    ]
+                    "main_output_variable": "Q"
                 }
             }],
             "forcing": {
