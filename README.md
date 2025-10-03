@@ -6,13 +6,36 @@ For example, this could be used to run a NextGen model only within a rectangle d
 
 In the future, as long as the NextGen-based NWM produces channel_rt output in the same format, this module could be used to implement localized more computationally-intensive or higher-resolution "overlay" model runs that pull boundary flows from the continental-scale model. If the output changes, this module should be updated to support the same use-case using the new NWM outputs.
 
-**Language**: Python
-**Dependencies**: Python>=3.9, NumPy, xarray, pyyaml, netCDF4
-**Status**: ALPHA - undergoing frequent change, no guarantee of compatibility between versions, documentation may easily become outdated!
+* **Language**: Python
+* **Dependencies**: Python>=3.9, NumPy, xarray, pyyaml, netCDF4
+* **Status**: ALPHA - undergoing frequent change, no guarantee of compatibility between versions, documentation may easily become outdated!
 
 ## Installation
 
-COMING SOON...
+Install with pip directly from GitHub:
+```
+pip install git+https://github.com/mattw-nws/CopyCat
+```
+
+### NGIAB
+
+To use with [NGIAB](https://github.com/CIROH-UA/NGIAB-CloudInfra), you may need to make a new image that includes CopyCat. A simple Dockerfile like this will do:
+
+```
+FROM docker.io/awiciroh/ciroh-ngen-image 
+RUN dnf install git -y && dnf clean all && rm -rf /var/cache/dnf
+RUN uv pip install git+https://github.com/mattw-nws/CopyCat
+```
+
+Build the image like so:
+```
+docker build -f Dockerfile -t ciroh-ngen-image-copycat:latest
+```
+
+If you are using `guide.sh`, you can then specify this custom image using the `-i` option:
+```
+./guide.sh -p -i localhost/ciroh-ngen-image-copycat
+```
 
 ## Configuration
 
