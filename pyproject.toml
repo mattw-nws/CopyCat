@@ -4,7 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copycatbmi"
-version = "0.0.1"
+version = "0.0.3"
+dependencies = [
+  "numpy>=1.26.4",
+  "xarray>=2024.7.0",
+  "PyYAML>=6.0.3",
+  "bmipy>=2.0.1"
+]
 authors = [
   { name="Matt Williamson" },
 ]
