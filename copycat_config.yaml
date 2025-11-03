@@ -1,4 +1,4 @@
 cache_dir: /tmp/copycat
-crosswalk: ./config/copycat_crosswalk.dbm
-start_time: "2020-08-11 01:00:00"
-source_base: https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/v3.0/nwm.20251001/medium_range_blend/nwm.t06z.medium_range_blend.channel_rt.f001.conus.nc
+start_time: "2025-11-03 02:00:00"
+end_time: "2025-11-04 02:00:00"
+source_base: NOMADS

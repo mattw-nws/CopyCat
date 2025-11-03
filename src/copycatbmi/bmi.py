@@ -1,11 +1,11 @@
 import fcntl
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath, PosixPath, PurePosixPath
 import time
 from urllib.parse import urlparse, ParseResult
 import re
-from urllib.request import urlretrieve
+from urllib.request import Request, urlopen, urlretrieve
 import uuid
 from typing import Any
 from typing import Union, Optional
@@ -27,6 +27,47 @@ logger = logging.getLogger(__name__)
 
 class CopyCat(BmiBase):
 
+    _source_data_dict = {
+        "NODD": {
+            "url_base": "https://storage.googleapis.com/national-water-model/",
+            "path_template": "nwm.{init_date}/{model_dir}/nwm.t{init_hour}z.{model_name}.channel_rt{var_file_suffix}.f{forecast_hour}.conus.nc"
+        },
+        "NOMADS": {
+            "url_base": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/nwm/v3.0/",
+            "path_template": "nwm.{init_date}/{model_dir}/nwm.t{init_hour}z.{model_name}.channel_rt{var_file_suffix}.f{forecast_hour}.conus.nc"
+        }
+    }
+
+    _model_path_data_dict = {
+        "medium_range_mem1": {
+            "version": "3.0",
+            "model_dir": "medium_range_mem1",
+            "model_name": "medium_range",
+            "var_file_suffix": "_1",
+            "hours": 240,
+            "run_freq": 6,
+            "lag": 5
+        },
+        "medium_range_blend": {
+            "version": "3.0",
+            "model_dir": "medium_range_blend",
+            "model_name": "medium_range_blend",
+            "var_file_suffix": "",
+            "hours": 240,
+            "run_freq": 6,
+            "lag": 5
+        },
+        "short_range": {
+            "version": "3.0",
+            "model_dir": "short_range",
+            "model_name": "short_range",
+            "var_file_suffix": "",
+            "hours": 18,
+            "run_freq": 1,
+            "lag": 1
+        }
+    }
+
     def __init__(self) -> None:
         self._timestep: int = 0
         self._t0: datetime = datetime.now()
@@ -45,20 +86,24 @@ class CopyCat(BmiBase):
             self._config = yaml.safe_load(f)
 
         try:
-            self._t0 = datetime.fromisoformat(self._config['start_time'])
+            self._t0 = datetime.fromisoformat(self._config['start_time']).replace(tzinfo=timezone.utc)
         except KeyError as e:
             logger.critical("start_time not found in config file")
             raise e
         except ValueError as e:
             logger.critical("start_time not in valid ISO format")
             raise e
+        if 'end_time' in self._config:
+            try:
+                self._tend = datetime.fromisoformat(self._config['end_time']).replace(tzinfo=timezone.utc)
+            except ValueError as e:
+                logger.critical("end_time not in valid ISO format")
+                raise e
+        else:
+            self._tend = None
         
-        try:
-            self._source_base = self._config['source_base']
-        except KeyError as e:
-            logger.critical("source_base not found in config")
-            raise e
-        
+        self._source_base = self._config.get('source_base', None)
+
         crosswalk_path = self._config.get('crosswalk', None)
         if crosswalk_path is not None:
             self._crosswalk_path = Path(crosswalk_path)
@@ -181,28 +226,9 @@ class CopyCat(BmiBase):
         self._is_leader = False
 
     def _init_store(self) -> None:
-        #TODO: Eventually, allow just specifying "NOMADS" or "AWS" (like Herbie) and figuring out the right path
 
-        pr = urlparse(self._source_base)
-        self._base_url = pr
+        self._derive_source(self._source_base)
 
-        is_file = False
-        if pr.scheme != '':
-            p = PurePosixPath(pr.path)
-            if p.suffix == '.nc':
-                is_file = True
-        else:
-            p = Path(pr.path)
-            if p.exists() and p.is_file():
-                is_file = True
-
-        if not is_file:
-            raise NotImplementedError("Directory source_base not yet implemented--specify a filename to use for t0 instead.")
-            #TODO: figure out what file to use within the directory
-
-        self._base = p
-
-        self._t0_fnum = int(re.search('f([0-9]{3})',p.stem).group(1))
 
     
     def _get_dataset(self) -> xr.Dataset:
@@ -235,6 +261,120 @@ class CopyCat(BmiBase):
         else:
             ds = xr.open_dataset(source)
         return ds
+    
+    def _derive_source(self, source_base: str):
+        # A source_base config entry can be a specific starting FILE, OR a 
+        # known source key OR a URL or filesystem path to a NOMADS-style 
+        # directory structure leading to model files.
+        #FIXME: Allow path_template to be specified in config to enable custom directory structures or even ""/"." for a direct path.
+
+        #TODO: Make configurable!
+        source_variant = "medium_range_mem1"
+        variant_info = CopyCat._model_path_data_dict[source_variant]
+
+        if source_base is None:
+            now = datetime.now(tz=timezone.utc)
+            wayback = now - self._t0
+            if wayback < timedelta(hours=40):
+                source_base = "NOMADS"
+            elif self._t0 > datetime(year=2023, month=9, day=20, tzinfo=timezone.utc):
+                source_base = "NODD"
+            else:
+                source_base = "RETRO"
+
+        url_base = None
+        path_template = None
+        if source_base in CopyCat._source_data_dict:
+            url_base = CopyCat._source_data_dict[source_base]['url_base']
+            path_template = CopyCat._source_data_dict[source_base]['path_template']
+        elif source_base == "RETRO":
+            raise NotImplementedError("NWM Retrospective source not yet implemented!")
+        else:
+            url_base = source_base
+        
+        if path_template is None:
+            # Assume a NOMADS path structure if none other has been derived...
+            path_template = CopyCat._source_data_dict["NOMADS"]['path_template']
+
+        pr = urlparse(url_base)
+        self._base_url = pr
+
+        is_file = False
+        if pr.scheme != '':
+            p = PurePosixPath(pr.path)
+            if p.suffix == '.nc':
+                is_file = True
+        else:
+            p = Path(pr.path)
+            if p.exists() and p.is_file():
+                is_file = True
+
+        model_freq = variant_info.get('run_freq')
+        model_lag = variant_info.get('lag')
+        model_hours = variant_info.get('hours')
+        model_stride = variant_info.get('stride', 1) # will need if we figure out how to support LR
+
+        quantizer = timedelta(hours=model_freq).seconds
+        attempt = min(self._t0, datetime.now(timezone.utc) - timedelta(hours=model_lag)) # no sooner than 5 hours
+        attempt = datetime.fromtimestamp(
+            (attempt.timestamp()//quantizer)*quantizer, # quantize to 6-hourly
+            tz=timezone.utc)
+        hour_str = None
+
+        if not is_file:
+            while True:
+                hour_str = str(attempt.hour).zfill(2)
+                t0_delta = self._t0 - attempt
+                t0_forecast_hour = int(t0_delta.total_seconds() // 3600)
+                logger.debug(f"{t0_delta=}")
+                attempt_str = path_template.format(init_date = attempt.strftime('%Y%m%d'), init_hour=hour_str, forecast_hour=str(t0_forecast_hour).zfill(3), **variant_info)
+                logger.info(f"Trying {url_base}{attempt_str}")
+                if pr.scheme == '':
+                    logger.debug("Using filesystem path")
+                    if (p / attempt_str).exists():
+                        break
+                else:
+                    # Bypasses parsed URL! Is this best?
+                    req = Request(url = (url_base + attempt_str), method='HEAD')
+                    max_retries = 3
+                    retries = 0
+                    with urlopen(req) as response:
+                        status_code = response.getcode()
+                        logger.debug(f"{status_code=}")
+                        if status_code == 200:
+                            break
+                        if status_code != 404:
+                            logger.error(f"Got {status_code} response code for {attempt_str}! Rate-limiting?")
+                            retries += 1
+                            if retries > max_retries:
+                                raise RuntimeError(f"Max retries attempting to get {attempt_str}. Check data and parameters.")
+                        # else, must be 404
+                if(datetime.now(timezone.utc) - attempt > timedelta(days=1)):
+                    logger.error(f"Rolled all the way back to {attempt.isoformat()} looking for {variant_info['model_name']} forecast data!")
+                    raise RuntimeError("Unable to retrieve forecast data. Check data and parameters.")
+                # else, go around again!
+                attempt = attempt - timedelta(hours=model_freq)
+            
+            pr = urlparse(url_base + attempt_str)
+            self._base_url = pr
+
+            if pr.scheme != '':
+                p = PurePosixPath(pr.path)
+            else:
+                p = Path(pr.path)
+            
+        self._base = p
+
+        self._t0_fnum = int(re.search('f([0-9]{3})',p.stem).group(1))
+
+        if self._tend is not None:
+            # Validate if end hour is possible to obtain...
+            t0_tend_delta_hours = (self._tend - self._t0).total_seconds() // 3600
+            if self._t0_fnum + t0_tend_delta_hours > model_hours:
+                raise ValueError(f"Simulation end date {self._tend} exceeds the data available for model {variant_info['model_name']} when starting at forecast hour {self._t0_fnum} (init_time {attempt.strftime('%Y%m%d')})")
+
+
+
             
     def _init_crosswalk(self) -> None:
         #FIXME: Implement!
