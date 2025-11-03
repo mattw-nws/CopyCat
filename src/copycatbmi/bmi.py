@@ -79,6 +79,7 @@ class CopyCat(BmiBase):
         self._qvar = np.array([self._q], dtype=np.float32)
         self._fidvar = np.array([self._q], dtype=np.int64)
         self._cnumvar = np.array([self._q], dtype=np.int64)
+        self._areavar = np.array([self._q], dtype=np.float32)
         
     def update(self) -> None:
         self.update_until(self._tN + 3600)
@@ -88,7 +89,7 @@ class CopyCat(BmiBase):
         ds = self._get_dataset()
         logger.info(self._feature_id)
         logger.info(ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0])
-        self._q = ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0]
+        self._q = ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0] / self._area_sqm
         self._qvar = np.array([self._q], dtype=np.float32)
 
     def get_time_step(self) -> float:
@@ -114,14 +115,18 @@ class CopyCat(BmiBase):
             return self._fidvar
         if name == 'catchment_num':
             return self._cnumvar
+        if name == 'area':
+            return self._areavar
         else:
             raise RuntimeError(f"Unknown variable '{name}'")
 
     def get_var_units(self, name: str) -> str:
         if name == 'Q':
-            return 'm^3/s'
-        if name == 'feature_id' or name == 'catchment_num':
+            return 'm/h'
+        if name in 'feature_id' or name == 'catchment_num':
             return 'm/m'
+        if name == 'area':
+            return 'km^3'
         else:
             raise RuntimeError(f"Unknown variable '{name}'")
 
@@ -132,6 +137,9 @@ class CopyCat(BmiBase):
         if name == 'catchment_num':
             self._feature_id = self._get_xw_catchment(int(src[0]))
             self._cnumvar[0] = int(src[0])
+        if name == 'area':
+            self._area_sqm = float(src[0])*1_000_000 # now in sqm!
+            self._areavar[0] = float(src[0]) # remains in sqkm
         else:
             pass #ignore
 
