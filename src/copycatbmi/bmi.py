@@ -196,6 +196,7 @@ class CopyCat(BmiBase):
             self._is_leader = False
             return
         try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
             with open(self._cache_dir/'leader.id', "a") as f:
                 fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB) # Try to acquire exclusive lock
                 self._is_leader = True
