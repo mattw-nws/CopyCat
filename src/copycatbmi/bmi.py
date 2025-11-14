@@ -134,7 +134,7 @@ class CopyCat(BmiBase):
         ds = self._get_dataset()
         logger.info(self._feature_id)
         logger.info(ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0])
-        self._q = ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0] / self._area_sqm
+        self._q = 3600 * ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0] / self._area_sqm
         self._qvar = np.array([self._q], dtype=np.float32)
 
     def get_time_step(self) -> float:
