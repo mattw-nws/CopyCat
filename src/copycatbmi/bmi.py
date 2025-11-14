@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath, PosixPath, PurePosixPath
 import time
+from urllib.error import HTTPError
 from urllib.parse import urlparse, ParseResult
 import re
 from urllib.request import Request, urlopen, urlretrieve
@@ -196,6 +197,7 @@ class CopyCat(BmiBase):
             self._is_leader = False
             return
         try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
             with open(self._cache_dir/'leader.id', "a") as f:
                 fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB) # Try to acquire exclusive lock
                 self._is_leader = True
@@ -232,6 +234,8 @@ class CopyCat(BmiBase):
 
     
     def _get_dataset(self) -> xr.Dataset:
+        max_retries = 5
+        retry_backoff_start = 5
         p = self._base.with_stem(re.sub('f[0-9]{3}', f"f{str(self._t0_fnum + (self._tN//3600)).zfill(3)}", self._base.stem))
         logger.info(p)
         source = str(p)
@@ -244,9 +248,31 @@ class CopyCat(BmiBase):
                 ds = xr.open_dataset(p)
             else:
                 if self._is_leader:
-                    ptemp = p.with_name('_'+p.name)
-                    urlretrieve(source, ptemp) #FIXME: Make robust to HTTP errors, retry!
-                    ptemp.rename(p) # Should be fairly atomic
+                    logger.warning(f"Leader {self._uuid} is downloading {p.name}")
+                    retries = max_retries
+                    retry_backoff = retry_backoff_start
+                    while retries > 0:
+                        ptemp = p.with_name('_'+p.name)
+                        try:
+                            urlretrieve(source, ptemp)
+                            ptemp.rename(p) # Should be fairly atomic
+                            break
+                        except HTTPError as e:
+                            logger.error(f"HTTPError {e.code} ({e.reason}) - retrying, {retries} left")
+                            retries -= 1
+                            logger.warning(f"Sleeping {retry_backoff} before retry")
+                            time.sleep(retry_backoff)
+                            retry_backoff = retry_backoff + retry_backoff
+                        except FileNotFoundError as e:
+                            logger.error(f"FileNotFoundError when trying to finish download (race condition?) - retrying, {retries} left")
+                            retries -= 1
+                            logger.warning(f"Sleeping {retry_backoff} before retry")
+                            time.sleep(retry_backoff)
+                            retry_backoff = retry_backoff + retry_backoff
+                    else:
+                        msg = f"Repeated failures downloading {p.name}. Aborting."
+                        logger.critical(msg)
+                        raise RuntimeError(msg)
                 else:
                     waitmax = 300 #TODO: Make configurable?
                     waitstep = 2
