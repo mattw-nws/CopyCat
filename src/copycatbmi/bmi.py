@@ -154,7 +154,7 @@ class CopyCat(BmiBase):
         (self._base, self._base_url, self._t0_fnum) = self._source_manager.derive_source(self._source_base, self._t0, self._tend)
             
 
-    def _cleanup_source_manager():
+    def _cleanup_source_manager(self):
         #TODO: Do we need to call this in more places?
         if self._source_manager is not None:
             self._source_manager.__exit__()
