@@ -22,7 +22,7 @@ except Exception as e:
     from numpy import ndarray as NDArray    
 
 from .base import BmiBase
-from .source_manager import SourceManager
+from .source_manager import SourceManager, Source
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,7 @@ class CopyCat(BmiBase):
         self._feature_id: int = 0
         self._tN: int = 0
         self._source_base: str = ""
-        self._base: PurePath = Path('/')
-        self._base_url: ParseResult
-        self._t0_fnum: int = 0
+        self._source: Optional[Source]
         self._crosswalk_path: Optional[Path] = None
         self._cache_dir: Optional[Path] = None
         self._source_manager: Optional[SourceManager] = None
@@ -89,7 +87,7 @@ class CopyCat(BmiBase):
 
     def update_until(self, time: float) -> None:
         self._tN = int(time)
-        ds = self._source_manager.get_dataset(self._base, self._base_url, self._t0_fnum, self._tN)
+        ds = self._source_manager.get_dataset(self._source, self._tN)
         logger.info(self._feature_id)
         logger.info(ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0])
         self._q = 3600 * ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0] / self._area_sqm
@@ -151,7 +149,7 @@ class CopyCat(BmiBase):
 
     def _init_store(self) -> None:
 
-        (self._base, self._base_url, self._t0_fnum) = self._source_manager.derive_source(self._source_base, self._t0, self._tend)
+        self._source = self._source_manager.derive_source(self._source_base, self._t0, self._tend)
             
 
     def _cleanup_source_manager(self):

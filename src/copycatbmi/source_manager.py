@@ -37,6 +37,25 @@ class SingletonMeta(type):
                 cls._instances[cls] = instance
         return cls._instances[cls]
     
+class Source():
+    def __init__(self, base, base_url, t0_fnum):
+        self._base = base
+        self._base_url = base_url
+        self._t0_fnum = t0_fnum
+
+    @property
+    def base(self):
+        return self._base
+    
+    @property
+    def base_url(self):
+        return self._base_url
+
+    @property
+    def t0_fnum(self):
+        return self._t0_fnum
+
+
 class SourceManager(metaclass=SingletonMeta):
     _source_data_dict = {
         "NODD": {
@@ -99,7 +118,7 @@ class SourceManager(metaclass=SingletonMeta):
         #TODO: Ignoring exceptions--is this the right thing to do?
         return False
 
-    def derive_source(self, source_base: str, t0: datetime, tend: Optional[datetime]):
+    def derive_source(self, source_base: str, t0: datetime, tend: Optional[datetime]) -> Source:
         # A source_base config entry can be a specific starting FILE, OR a 
         # known source key OR a URL or filesystem path to a NOMADS-style 
         # directory structure leading to model files.
@@ -210,16 +229,16 @@ class SourceManager(metaclass=SingletonMeta):
             if t0_fnum + t0_tend_delta_hours > model_hours:
                 raise ValueError(f"Simulation end date {tend} exceeds the data available for model {variant_info['model_name']} when starting at forecast hour {t0_fnum} (init_time {attempt.strftime('%Y%m%d')})")
 
-        return (base, base_url, t0_fnum) #FIXME: this should be a class
+        return Source(base, base_url, t0_fnum)
 
-    def get_dataset(self, base, base_url, t0_fnum, tN) -> xr.Dataset:
+    def get_dataset(self, source: Source, tN: int) -> xr.Dataset:
         max_retries = 5
         retry_backoff_start = 5
-        p = base.with_stem(re.sub('f[0-9]{3}', f"f{str(t0_fnum + (tN//3600)).zfill(3)}", base.stem))
+        p = source.base.with_stem(re.sub('f[0-9]{3}', f"f{str(source.t0_fnum + (tN//3600)).zfill(3)}", source.base.stem))
         logger.info(p)
-        source = str(p)
-        if base_url.scheme:
-            source = base_url.scheme + '://' + base_url.netloc + source + '#mode=bytes'
+        source_str = str(p)
+        if source.base_url.scheme:
+            source_str = source.base_url.scheme + '://' + source.base_url.netloc + source_str + '#mode=bytes'
             
         if self._cache_dir:
             p = self._cache_dir / p.name
@@ -227,13 +246,13 @@ class SourceManager(metaclass=SingletonMeta):
                 ds = xr.open_dataset(p)
             else:
                 if self._is_leader:
-                    logger.warning(f"Leader {self._uuid} is downloading {p.name}")
+                    logger.warning(f"Leader {self._uuid} is downloading {source_str}")
                     retries = max_retries
                     retry_backoff = retry_backoff_start
                     while retries > 0:
                         ptemp = p.with_name('_'+p.name)
                         try:
-                            urlretrieve(source, ptemp)
+                            urlretrieve(source_str, ptemp)
                             ptemp.rename(p) # Should be fairly atomic
                             break
                         except HTTPError as e:
@@ -264,7 +283,7 @@ class SourceManager(metaclass=SingletonMeta):
                         raise RuntimeError(f"Waited >={waitmax}s for {p.name} to arrive. Timed out!")
                 ds = xr.open_dataset(p)
         else:
-            ds = xr.open_dataset(source)
+            ds = xr.open_dataset(source_str)
         return ds
 
     def _elect_leader(self) -> None:
