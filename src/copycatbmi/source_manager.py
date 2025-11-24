@@ -108,11 +108,13 @@ class SourceManager(metaclass=SingletonMeta):
             self._cache_dir = None
 
     def __enter__(self):
-        self._entries += 1
+        with SourceManager._lock:
+            self._entries += 1 #FIXME: Lock this?
         return self
     
     def __exit__(self, exc_type, exc_value, traceback):
-        self._entries -= 1
+        with SourceManager._lock:
+            self._entries -= 1
         if self._entries == 0:
             self._release_leader()
         #TODO: Ignoring exceptions--is this the right thing to do?
