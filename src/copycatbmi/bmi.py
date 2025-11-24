@@ -155,7 +155,7 @@ class CopyCat(BmiBase):
     def _cleanup_source_manager(self):
         #TODO: Do we need to call this in more places?
         if self._source_manager is not None:
-            self._source_manager.__exit__()
+            self._source_manager.__exit__(None, None, None)
 
     def _init_crosswalk(self) -> None:
         #FIXME: Implement!
