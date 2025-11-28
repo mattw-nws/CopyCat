@@ -286,7 +286,15 @@ class SourceManager(metaclass=SingletonMeta):
                 ds = xr.open_dataset(p)
         else:
             ds = xr.open_dataset(source_str)
-        return ds
+        
+        # Get count of NaNs in the `streamflow` variable and issue a warning if there are more than 0...
+        nan_count = int(ds['streamflow'].isnull().sum().values)
+        if nan_count > 0:
+            logger.warning(f"Dataset {p.name} has {nan_count} NaN values in `streamflow` variable. Filling with 0.")
+
+        #TODO: To copy, nor not to copy? We may get significant memory savings by not copying,
+        # but given that we can't use a context manager on the ds, are we playing with fire?
+        return xr.Dataset({'streamflow': ds['streamflow'].fillna(0)})
 
     def _elect_leader(self) -> None:
         if not self._cache_dir:
