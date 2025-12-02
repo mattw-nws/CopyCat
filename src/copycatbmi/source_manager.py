@@ -120,7 +120,7 @@ class SourceManager(metaclass=SingletonMeta):
         #TODO: Ignoring exceptions--is this the right thing to do?
         return False
 
-    def derive_source(self, source_base: str, t0: datetime, tend: Optional[datetime]) -> Source:
+    def derive_source(self, t0: datetime, tend: Optional[datetime], source_base: Optional[str]) -> Source:
         # A source_base config entry can be a specific starting FILE, OR a 
         # known source key OR a URL or filesystem path to a NOMADS-style 
         # directory structure leading to model files.
@@ -286,7 +286,10 @@ class SourceManager(metaclass=SingletonMeta):
                 ds = xr.open_dataset(p)
         else:
             ds = xr.open_dataset(source_str)
-        return ds
+        
+        #TODO: To copy, nor not to copy? We may get significant memory savings by not copying,
+        # but given that we can't use a context manager on the ds, are we playing with fire?
+        return xr.Dataset({'streamflow': ds['streamflow']})
 
     def _elect_leader(self) -> None:
         if not self._cache_dir:
