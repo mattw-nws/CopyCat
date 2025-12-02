@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class TRouteWarmer():
 
-    def __init__(self, cache_dir: Union[str, Path, None], source_base: Optional[str]):
+    def __init__(self, cache_dir: Union[str, Path, None] = None, source_base: Optional[str] = None):
         # Don't create the SourceManager right now because we'll want to use `with` later...
         self._source_base = source_base
         self._cache_dir = cache_dir
