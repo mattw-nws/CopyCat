@@ -88,9 +88,12 @@ class CopyCat(BmiBase):
     def update_until(self, time: float) -> None:
         self._tN = int(time)
         ds = self._source_manager.get_dataset(self._source, self._tN)
-        logger.info(self._feature_id)
-        logger.info(ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0])
-        self._q = 3600 * ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0] / self._area_sqm
+        logger.debug(self._feature_id)
+        #logger.debug(ds['streamflow'][(ds['feature_id'] == self._feature_id)].values[0])
+        result = ds['streamflow'][(ds['feature_id'] == self._feature_id)]
+        if result.isnull():
+            logger.warning(f"Got NaN for feature {self._feature_id} at tN={self._tN}, using zero.")
+        self._q = 3600 * result.fillna(0).values[0] / self._area_sqm
         self._qvar = np.array([self._q], dtype=np.float32)
 
     def get_time_step(self) -> float:
