@@ -149,7 +149,7 @@ class CopyCat(BmiBase):
 
     def _init_store(self) -> None:
 
-        self._source = self._source_manager.derive_source(self._source_base, self._t0, self._tend)
+        self._source = self._source_manager.derive_source(t0=self._t0, tend=self._tend, source_base=self._source_base)
             
 
     def _cleanup_source_manager(self):

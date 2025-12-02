@@ -6,7 +6,7 @@ from .source_manager import SourceManager, Source
 
 class TRouteWarmer():
 
-    def __init__(self, source_base: str, cache_dir: Union[str, Path, None]):
+    def __init__(self, cache_dir: Union[str, Path, None], source_base: Optional[str]):
         # Don't create the SourceManager right now because we'll want to use `with` later...
         self._source_base = source_base
         self._cache_dir = cache_dir
@@ -15,7 +15,7 @@ class TRouteWarmer():
         flowpath_ids = list(features.keys())
         feature_ids = list(features.values())
         with SourceManager(self._cache_dir) as sm:
-            source = sm.derive_source(source_base=self._source_base, t0=tm1, tend=tm1)
+            source = sm.derive_source(t0=tm1, tend=tm1, source_base=self._source_base)
             ds = sm.get_dataset(source, 0)
 
             qtm1_out = ds.sel(feature_id=feature_ids)['streamflow'].to_dataframe()
