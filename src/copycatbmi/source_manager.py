@@ -100,6 +100,7 @@ class SourceManager(metaclass=SingletonMeta):
 
     def __init__(self, cache_dir) -> None:
         self._entries = 0
+        self._is_leader = False
         self._uuid: uuid.UUID = uuid.uuid4()
         if cache_dir is not None:
             self._cache_dir = Path(cache_dir)
