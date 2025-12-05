@@ -120,7 +120,7 @@ class SourceManager(metaclass=SingletonMeta):
         #TODO: Ignoring exceptions--is this the right thing to do?
         return False
 
-    def derive_source(self, t0: datetime, tend: Optional[datetime], source_base: Optional[str]) -> Source:
+    def derive_source(self, t0: datetime, tend: Optional[datetime] = None, source_base: Optional[str] = None) -> Source:
         # A source_base config entry can be a specific starting FILE, OR a 
         # known source key OR a URL or filesystem path to a NOMADS-style 
         # directory structure leading to model files.
