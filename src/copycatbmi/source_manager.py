@@ -198,18 +198,21 @@ class SourceManager(metaclass=SingletonMeta):
                     req = Request(url = (url_base + attempt_str), method='HEAD')
                     max_retries = 3
                     retries = 0
-                    with urlopen(req) as response:
-                        status_code = response.getcode()
-                        logger.debug(f"{status_code=}")
-                        if status_code == 200:
-                            break
-                        if status_code != 404:
-                            logger.error(f"Got {status_code} response code for {attempt_str}! Rate-limiting?")
-                            retries += 1
-                            if retries > max_retries:
-                                raise RuntimeError(f"Max retries attempting to get {attempt_str}. Check data and parameters.")
-                        # else, must be 404
-                if(datetime.now(timezone.utc) - attempt > timedelta(days=1)):
+                    try:
+                        with urlopen(req) as response:
+                            status_code = response.getcode()
+                            logger.debug(f"{status_code=}")
+                    except HTTPError as e:
+                        status_code = e.code
+                    if status_code == 200:
+                        break
+                    if status_code != 404:
+                        logger.error(f"Got {status_code} response code for {attempt_str}! Rate-limiting?")
+                        retries += 1
+                        if retries > max_retries:
+                            raise RuntimeError(f"Max retries attempting to get {attempt_str}. Check data and parameters.")
+                    # else, must be 404
+                if(t0 - attempt > timedelta(days=1)): #TODO: Make rollback limit configurable for some use case?
                     logger.error(f"Rolled all the way back to {attempt.isoformat()} looking for {variant_info['model_name']} forecast data!")
                     raise RuntimeError("Unable to retrieve forecast data. Check data and parameters.")
                 # else, go around again!
