@@ -24,6 +24,11 @@ classifiers = [
 license = "Apache-2.0"
 license-files = ["LICEN[CS]E*"]
 
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
+
 [project.urls]
 Homepage = "https://github.com/mattw-nws/CopyCat"
 Issues = "https://github.com/mattw-nws/CopyCat/issues"
