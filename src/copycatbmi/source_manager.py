@@ -179,6 +179,8 @@ class SourceManager(metaclass=SingletonMeta):
             tz=timezone.utc)
         hour_str = None
 
+        #TODO: Decompose somewhere around here so that it is possible to test above logic with mocks before making HTTP calls
+
         if not is_file:
             while True:
                 hour_str = str(attempt.hour).zfill(2)
