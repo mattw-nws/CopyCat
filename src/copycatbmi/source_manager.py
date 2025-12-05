@@ -109,6 +109,8 @@ class SourceManager(metaclass=SingletonMeta):
             self._cache_dir = None
 
     def __enter__(self):
+        if self._entries == 0:
+           self._elect_leader()
         with SourceManager._lock:
             self._entries += 1 #FIXME: Lock this?
         return self
