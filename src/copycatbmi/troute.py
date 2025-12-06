@@ -1,4 +1,5 @@
 import logging
+import sys
 from typing import Union, Optional
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ class TRouteWarmer():
         # Don't create the SourceManager right now because we'll want to use `with` later...
         self._source_base = source_base
         self._cache_dir = cache_dir
+        logger.info('CopyCat TRouteWarmer init - v' + sys.modules[self.__module__.split('.')[0]].__version__)
+
 
     def make_channel_restart_file(self, tm1: datetime, features: dict[int,int], dest: Union[str, Path]):
         flowpath_ids = list(features.keys())
