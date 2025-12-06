@@ -1,5 +1,6 @@
 """Tests for the SourceManager class."""
 
+from urllib.error import HTTPError
 import pytest
 import tempfile
 from pathlib import Path
@@ -254,27 +255,29 @@ class TestRegressionSourceManager:
         
         sm = SourceManager(str(temp_cache_dir))
         
+        t0 = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        t0 = t0.replace(hour=12)
+        
+        source = sm.derive_source(t0, None, None) # Without mock, this actually fails before issue #12 fix
+        assert source.t0_fnum != 0
+
+    def test_issue_12_derive_source_404_no_httperror(self, temp_cache_dir):
+        """Test that starting a simulation at hour zero of a run does not fail."""
+        SingletonMeta._instances.clear()
+        
+        sm = SourceManager(str(temp_cache_dir))
+        
         # Use a recent time (within 40 hours of now)
         t0 = datetime.now(tz=timezone.utc) - timedelta(days=15)
         t0 = t0.replace(hour=12)
         
-#         with patch('copycatbmi.source_manager.urlopen') as mock_urlopen:
-#             # Always return 404
-#             mock_response = MagicMock()
-#             mock_response.getcode.return_value = 404
-#             mock_response.__enter__.return_value = mock_response
-#             mock_response.__exit__.return_value = False
-#             mock_urlopen.return_value = mock_response
         with patch('copycatbmi.source_manager.urlopen') as mock_urlopen, \
                 patch.object(sm, 'derive_source', wraps=sm.derive_source) as mock_derive:
-            mock_response = MagicMock()
-            mock_response.getcode.return_value = 200
-            mock_response.__enter__.return_value = mock_response
-            mock_response.__exit__.return_value = False
-            mock_urlopen.return_value = mock_response
+            mock_urlopen.side_effect = HTTPError(url='http://example.org/', code=404, msg="Mock Not Found", hdrs=[], fp=None)
+            mock_urlopen.return_value = None
 
-            source = sm.derive_source(t0, None, None) # Without mock, this actually fails before issue #12 fix
-            assert source.t0_fnum != 0
+            with pytest.raises(RuntimeError, match="Unable to retrieve forecast data"):
+                source = sm.derive_source(t0, None, None) 
 
 
 #TODO: This test isn't working with arithmetic on mock objects, but is worth testing--fix!

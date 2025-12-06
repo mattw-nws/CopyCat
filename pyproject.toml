@@ -7,7 +7,7 @@ name = "copycatbmi"
 version = "0.0.5"
 dependencies = [
   "numpy>=1.26.4",
-  "xarray>=2024.7.0",
+  "xarray>=2024.2.0",
   "PyYAML>=6.0.3",
   "bmipy>=2.0.1"
 ]
@@ -23,6 +23,11 @@ classifiers = [
 ]
 license = "Apache-2.0"
 license-files = ["LICEN[CS]E*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
 
 [project.urls]
 Homepage = "https://github.com/mattw-nws/CopyCat"

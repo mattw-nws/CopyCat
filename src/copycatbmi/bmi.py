@@ -2,6 +2,7 @@ import fcntl
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath, PosixPath, PurePosixPath
+import sys
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlparse, ParseResult
@@ -42,6 +43,7 @@ class CopyCat(BmiBase):
         self._source_manager: Optional[SourceManager] = None
 
     def initialize(self, config_file: str) -> None:
+        logger.info('CopyCat initialize - v' + sys.modules[self.__module__.split('.')[0]].__version__)
         with open(config_file, "r") as f:
             self._config = yaml.safe_load(f)
 
