@@ -95,7 +95,12 @@ class CopyCat(BmiBase):
         result = ds['streamflow'][(ds['feature_id'] == self._feature_id)]
         if result.isnull():
             logger.warning(f"Got NaN for feature {self._feature_id} at tN={self._tN}, using zero.")
-        self._q = 3600 * result.fillna(0).values[0] / self._area_sqm
+            self._q = 0
+        elif len(result.values) == 0:
+            logger.warning(f"Got no results for feature {self._feature_id} at tN={self._tN} (non-existent reach?), returning zero.")
+            self._q = 0
+        else:
+            self._q = 3600 * result.values[0] / self._area_sqm
         self._qvar = np.array([self._q], dtype=np.float32)
 
     def get_time_step(self) -> float:

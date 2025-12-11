@@ -18,14 +18,22 @@ class TRouteWarmer():
 
 
     def make_channel_restart_file(self, tm1: datetime, features: dict[int,int], dest: Union[str, Path]):
-        flowpath_ids = list(features.keys())
         feature_ids = list(features.values())
         with SourceManager(self._cache_dir) as sm:
             source = sm.derive_source(t0=tm1, tend=tm1, source_base=self._source_base)
             ds = sm.get_dataset(source, 0)
 
-            # Get count of NaNs in the `streamflow` variable and issue a warning if there are more than 0...
+            missing = [feature_id for feature_id in feature_ids if feature_id not in ds.coords['feature_id'].values]
+            if len(missing) > 0:
+                logger.warning(f"Got {len(missing)} feature IDs not found in datset! These will be omitted!")
+                logger.info(f"Missing feature_ids: {missing}")
+                # rebuild features
+                features = { fpid: fid for fpid, fid in features.items() if fid not in missing }
+                feature_ids = list(features.values())
+            flowpath_ids = list(features.keys())
             ds = ds.sel(feature_id=feature_ids)
+
+            # Get count of NaNs in the `streamflow` variable and issue a warning if there are more than 0...
             nan_count = int(ds['streamflow'].isnull().sum().values)
             if nan_count > 0:
                 logger.warning(f"Dataset has {nan_count} NaN values in `streamflow` variable. Filling with 0.")
