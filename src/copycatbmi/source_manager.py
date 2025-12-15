@@ -1,4 +1,5 @@
 import fcntl
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath, PosixPath, PurePosixPath
@@ -38,7 +39,14 @@ class SingletonMeta(type):
         return cls._instances[cls]
     
 class Source():
-    def __init__(self, base, base_url, t0_fnum):
+    def __init__(self, base: Union[PurePath,str], base_url: Union[ParseResult,str], t0_fnum: int):
+        if not isinstance(base_url, ParseResult):
+            base_url = urlparse(base_url) 
+        if not isinstance(base, PurePath):
+            if base_url.scheme != '':
+                base = PurePosixPath(base)
+            else:
+                base = Path(base)
         self._base = base
         self._base_url = base_url
         self._t0_fnum = t0_fnum
@@ -132,6 +140,35 @@ class SourceManager(metaclass=SingletonMeta):
         if cache_key in SourceManager._source_cache:
             return SourceManager._source_cache[cache_key]
         
+        psource = None
+        if self._cache_dir:
+            psource = self._cache_dir / 'source.json'
+
+        # If we are not the leader, wait for the leader to drop a source file...
+        if psource and not self._is_leader:
+            waitmax = 300 #TODO: Make configurable?
+            waitstep = 2
+            waited = 0
+            while True:
+                logger.info(f"Waiting for leader to drop source.json, waited {waited}s...")
+                source = None
+                try:
+                    if psource.exists():
+                        with open(psource, 'r') as fsource:
+                            source_dict = json.load(fsource)
+                            source = Source(**source_dict)
+                            SourceManager._source_cache[cache_key] = source
+                            return source # Infinite loop ends here normally
+                except:
+                    pass
+                if not source and waited < waitmax:
+                    time.sleep(waitstep)
+                    waited += waitstep
+                if waited >= waitmax and not psource.exists():
+                    logger.critical(f"Waited >={waitmax}s for {psource.name} to arrive. Timed out!")
+                    raise RuntimeError(f"Waited >={waitmax}s for {psource.name} to arrive. Timed out!")
+
+        logger.info(f"Leader {self._uuid} deriving source...")
         # A source_base config entry can be a specific starting FILE, OR a 
         # known source key OR a URL or filesystem path to a NOMADS-style 
         # directory structure leading to model files.
@@ -246,6 +283,15 @@ class SourceManager(metaclass=SingletonMeta):
             t0_tend_delta_hours = (tend - t0).total_seconds() // 3600
             if t0_fnum + t0_tend_delta_hours > model_hours:
                 raise ValueError(f"Simulation end date {tend} exceeds the data available for model {variant_info['model_name']} when starting at forecast hour {t0_fnum} (init_time {attempt.strftime('%Y%m%d')})")
+
+        if psource:
+            with open(psource, 'w') as fsource:
+                json.dump({
+                    'base': str(base),
+                    'base_url': base_url.geturl(),
+                    't0_fnum': t0_fnum
+                }, fsource)
+            #with open(psource, 'r') as f: print(f.read())
 
         source = Source(base, base_url, t0_fnum)
         SourceManager._source_cache[cache_key] = source

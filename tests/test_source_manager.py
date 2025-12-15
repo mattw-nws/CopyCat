@@ -1,6 +1,7 @@
 """Tests for the SourceManager class."""
 
 from urllib.error import HTTPError
+from urllib.parse import urlparse
 import pytest
 import tempfile
 from pathlib import Path
@@ -18,10 +19,22 @@ class TestSource:
     def test_source_initialization(self):
         """Test Source object initialization."""
         base = Path("/path/to/file.nc")
-        base_url = "http://example.com/data/"
+        base_url = urlparse("http://example.com/data/")
         t0_fnum = 123
         
         source = Source(base, base_url, t0_fnum)
+        
+        assert source.base == base
+        assert source.base_url == base_url
+        assert source.t0_fnum == t0_fnum
+
+    def test_source_initialization_strings(self):
+        """Test Source object initialization."""
+        base = Path("/path/to/file.nc")
+        base_url = urlparse("http://example.com/data/")
+        t0_fnum = 123
+        
+        source = Source(str(base), base_url.geturl(), t0_fnum)
         
         assert source.base == base
         assert source.base_url == base_url
