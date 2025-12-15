@@ -1,4 +1,5 @@
 import fcntl
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath, PosixPath, PurePosixPath
@@ -38,7 +39,14 @@ class SingletonMeta(type):
         return cls._instances[cls]
     
 class Source():
-    def __init__(self, base, base_url, t0_fnum):
+    def __init__(self, base: Union[PurePath,str], base_url: Union[ParseResult,str], t0_fnum: int):
+        if not isinstance(base_url, ParseResult):
+            base_url = urlparse(base_url) 
+        if not isinstance(base, PurePath):
+            if base_url.scheme != '':
+                base = PurePosixPath(base)
+            else:
+                base = Path(base)
         self._base = base
         self._base_url = base_url
         self._t0_fnum = t0_fnum
@@ -98,9 +106,14 @@ class SourceManager(metaclass=SingletonMeta):
         }
     }
 
+    # for same-process re-use of derived sources.
+    # Should probably only ever contain one item.
+    _source_cache = {} 
+
     def __init__(self, cache_dir) -> None:
         self._entries = 0
         self._is_leader = False
+        self._leader_lock_fd = None
         self._uuid: uuid.UUID = uuid.uuid4()
         if cache_dir is not None:
             self._cache_dir = Path(cache_dir)
@@ -124,6 +137,39 @@ class SourceManager(metaclass=SingletonMeta):
         return False
 
     def derive_source(self, t0: datetime, tend: Optional[datetime] = None, source_base: Optional[str] = None) -> Source:
+        cache_key = (t0, tend, source_base)
+        if cache_key in SourceManager._source_cache:
+            return SourceManager._source_cache[cache_key]
+        
+        psource = None
+        if self._cache_dir:
+            psource = self._cache_dir / 'source.json'
+
+        # If we are not the leader, wait for the leader to drop a source file...
+        if psource and not self._is_leader:
+            waitmax = 300 #TODO: Make configurable?
+            waitstep = 2
+            waited = 0
+            while True:
+                logger.info(f"Waiting for leader to drop source.json, waited {waited}s...")
+                source = None
+                try:
+                    if psource.exists():
+                        with open(psource, 'r') as fsource:
+                            source_dict = json.load(fsource)
+                            source = Source(**source_dict)
+                            SourceManager._source_cache[cache_key] = source
+                            return source # Infinite loop ends here normally
+                except:
+                    pass
+                if not source and waited < waitmax:
+                    time.sleep(waitstep)
+                    waited += waitstep
+                if waited >= waitmax and not psource.exists():
+                    logger.critical(f"Waited >={waitmax}s for {psource.name} to arrive. Timed out!")
+                    raise RuntimeError(f"Waited >={waitmax}s for {psource.name} to arrive. Timed out!")
+
+        logger.info(f"Leader {self._uuid} deriving source...")
         # A source_base config entry can be a specific starting FILE, OR a 
         # known source key OR a URL or filesystem path to a NOMADS-style 
         # directory structure leading to model files.
@@ -239,7 +285,18 @@ class SourceManager(metaclass=SingletonMeta):
             if t0_fnum + t0_tend_delta_hours > model_hours:
                 raise ValueError(f"Simulation end date {tend} exceeds the data available for model {variant_info['model_name']} when starting at forecast hour {t0_fnum} (init_time {attempt.strftime('%Y%m%d')})")
 
-        return Source(base, base_url, t0_fnum)
+        if psource:
+            with open(psource, 'w') as fsource:
+                json.dump({
+                    'base': str(base),
+                    'base_url': base_url.geturl(),
+                    't0_fnum': t0_fnum
+                }, fsource)
+            #with open(psource, 'r') as f: print(f.read())
+
+        source = Source(base, base_url, t0_fnum)
+        SourceManager._source_cache[cache_key] = source
+        return source
 
     def get_dataset(self, source: Source, tN: int) -> xr.Dataset:
         max_retries = 5
@@ -305,14 +362,17 @@ class SourceManager(metaclass=SingletonMeta):
             return
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
-            with open(self._cache_dir/'leader.id', "a") as f:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB) # Try to acquire exclusive lock
-                self._is_leader = True
-                f.seek(0)
-                f.truncate()
-                f.write(str(self._uuid))
-                f.flush()
-                return
+            self._leader_lock_fd = open(self._cache_dir/'leader.id', "a")
+            fcntl.flock(self._leader_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB) # Try to acquire exclusive lock
+            self._is_leader = True
+            self._leader_lock_fd.seek(0)
+            self._leader_lock_fd.truncate()
+            self._leader_lock_fd.write(str(self._uuid))
+            self._leader_lock_fd.flush()
+            (self._cache_dir / 'source.json').unlink(missing_ok=True)
+
+
+            return
         except BlockingIOError:
             pass
         except Exception as e:
@@ -324,13 +384,18 @@ class SourceManager(metaclass=SingletonMeta):
         if not self._cache_dir or not self._is_leader:
             return
         try:
-            with open(self._cache_dir/'leader.id', "a") as f:
-                fcntl.flock(f, fcntl.LOCK_UN) # Release exclusive lock
-                self._is_leader = False
-                return
+            fcntl.flock(self._leader_lock_fd, fcntl.LOCK_UN) # Release exclusive lock
+            self._leader_lock_fd.close()
+            self._is_leader = False
         except Exception as e:
-            logger.critical(f"Unexpected error releasing leader lock! Seppuku to ensure lock release!")
-            raise e
+            logger.error(f"Failed to release lock on leader file--this could cause subsequent issues!")
+            logger.debug(str(e))
+        
+        try:
+            (self._cache_dir / 'leader.id').unlink()
+            (self._cache_dir / 'source.json').unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"Failed to clean up leader files (check permissions?)")
 
         self._is_leader = False
 
