@@ -390,6 +390,12 @@ class SourceManager(metaclass=SingletonMeta):
         except Exception as e:
             logger.error(f"Failed to release lock on leader file--this could cause subsequent issues!")
             logger.debug(str(e))
+        
+        try:
+            (self._cache_dir / 'leader.id').unlink()
+            (self._cache_dir / 'source.json').unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"Failed to clean up leader files (check permissions?)")
 
         self._is_leader = False
 
