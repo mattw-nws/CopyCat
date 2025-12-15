@@ -98,6 +98,10 @@ class SourceManager(metaclass=SingletonMeta):
         }
     }
 
+    # for same-process re-use of derived sources.
+    # Should probably only ever contain one item.
+    _source_cache = {} 
+
     def __init__(self, cache_dir) -> None:
         self._entries = 0
         self._is_leader = False
@@ -124,6 +128,10 @@ class SourceManager(metaclass=SingletonMeta):
         return False
 
     def derive_source(self, t0: datetime, tend: Optional[datetime] = None, source_base: Optional[str] = None) -> Source:
+        cache_key = (t0, tend, source_base)
+        if cache_key in SourceManager._source_cache:
+            return SourceManager._source_cache[cache_key]
+        
         # A source_base config entry can be a specific starting FILE, OR a 
         # known source key OR a URL or filesystem path to a NOMADS-style 
         # directory structure leading to model files.
@@ -239,7 +247,9 @@ class SourceManager(metaclass=SingletonMeta):
             if t0_fnum + t0_tend_delta_hours > model_hours:
                 raise ValueError(f"Simulation end date {tend} exceeds the data available for model {variant_info['model_name']} when starting at forecast hour {t0_fnum} (init_time {attempt.strftime('%Y%m%d')})")
 
-        return Source(base, base_url, t0_fnum)
+        source = Source(base, base_url, t0_fnum)
+        SourceManager._source_cache[cache_key] = source
+        return source
 
     def get_dataset(self, source: Source, tN: int) -> xr.Dataset:
         max_retries = 5
