@@ -113,6 +113,7 @@ class SourceManager(metaclass=SingletonMeta):
     def __init__(self, cache_dir) -> None:
         self._entries = 0
         self._is_leader = False
+        self._leader_lock_fd = None
         self._uuid: uuid.UUID = uuid.uuid4()
         if cache_dir is not None:
             self._cache_dir = Path(cache_dir)
@@ -361,14 +362,17 @@ class SourceManager(metaclass=SingletonMeta):
             return
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
-            with open(self._cache_dir/'leader.id', "a") as f:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB) # Try to acquire exclusive lock
-                self._is_leader = True
-                f.seek(0)
-                f.truncate()
-                f.write(str(self._uuid))
-                f.flush()
-                return
+            self._leader_lock_fd = open(self._cache_dir/'leader.id', "a")
+            fcntl.flock(self._leader_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB) # Try to acquire exclusive lock
+            self._is_leader = True
+            self._leader_lock_fd.seek(0)
+            self._leader_lock_fd.truncate()
+            self._leader_lock_fd.write(str(self._uuid))
+            self._leader_lock_fd.flush()
+            (self._cache_dir / 'source.json').unlink(missing_ok=True)
+
+
+            return
         except BlockingIOError:
             pass
         except Exception as e:
@@ -380,13 +384,12 @@ class SourceManager(metaclass=SingletonMeta):
         if not self._cache_dir or not self._is_leader:
             return
         try:
-            with open(self._cache_dir/'leader.id', "a") as f:
-                fcntl.flock(f, fcntl.LOCK_UN) # Release exclusive lock
-                self._is_leader = False
-                return
+            fcntl.flock(self._leader_lock_fd, fcntl.LOCK_UN) # Release exclusive lock
+            self._leader_lock_fd.close()
+            self._is_leader = False
         except Exception as e:
-            logger.critical(f"Unexpected error releasing leader lock! Seppuku to ensure lock release!")
-            raise e
+            logger.error(f"Failed to release lock on leader file--this could cause subsequent issues!")
+            logger.debug(str(e))
 
         self._is_leader = False
 
