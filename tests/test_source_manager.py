@@ -2,6 +2,7 @@
 
 from urllib.error import HTTPError
 from urllib.parse import urlparse
+import json
 import pytest
 import tempfile
 from pathlib import Path
@@ -291,6 +292,194 @@ class TestRegressionSourceManager:
 
             with pytest.raises(RuntimeError, match="Unable to retrieve forecast data"):
                 source = sm.derive_source(t0, None, None) 
+
+
+class TestRetrospectiveDeriveSource:
+    """Tests for derive_source with the retrospective (RETRO) dataset.
+
+    These use a local filesystem "bucket" (a tmp_path directory) standing in for
+    the real S3 bucket, and mocked HTTP responses, so no network access or large
+    data files are required.
+    """
+
+    @staticmethod
+    def _touch_retro_file(bucket_root: Path, dt: datetime) -> str:
+        """Create an empty file matching the RETRO path_template layout for `dt`."""
+        year_dir = bucket_root / "CHRTOUT" / f"{dt.year:04d}"
+        year_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"{dt.year:04d}{dt.month:02d}{dt.day:02d}{dt.hour:02d}00.CHRTOUT_DOMAIN1"
+        (year_dir / fname).touch()
+        return fname
+
+    def test_derive_source_retro_local_bucket(self, temp_cache_dir, tmp_path):
+        """A local-filesystem RETRO bucket resolves to the exact hourly file, with t0_fnum=0."""
+        SingletonMeta._instances.clear()
+        SourceManager._source_cache.clear()
+        sm = SourceManager(str(temp_cache_dir))
+
+        t0 = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        fname = self._touch_retro_file(tmp_path, t0)
+
+        with patch.dict(SourceManager._source_data_dict["RETRO"], {"url_base": str(tmp_path) + "/"}):
+            source = sm.derive_source(t0, None, "RETRO")
+
+        assert source.t0_fnum == 0
+        assert source.base.name == fname
+        assert "streamflow" in source._vtm
+
+    def test_derive_source_retro_auto_selected_for_old_dates(self, temp_cache_dir, tmp_path):
+        """derive_source auto-selects RETRO (rather than NODD/NOMADS) for old enough dates."""
+        SingletonMeta._instances.clear()
+        SourceManager._source_cache.clear()
+        sm = SourceManager(str(temp_cache_dir))
+
+        t0 = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        fname = self._touch_retro_file(tmp_path, t0)
+
+        with patch.dict(SourceManager._source_data_dict["RETRO"], {"url_base": str(tmp_path) + "/"}):
+            source = sm.derive_source(t0, None, None)
+
+        assert source.t0_fnum == 0
+        assert source.base.name == fname
+
+    def test_derive_source_retro_missing_local_file_raises(self, temp_cache_dir, tmp_path):
+        """A RETRO request for a date with no matching local file raises a clear error."""
+        SingletonMeta._instances.clear()
+        SourceManager._source_cache.clear()
+        sm = SourceManager(str(temp_cache_dir))
+
+        t0 = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        # Note: no file created in tmp_path for this date.
+
+        with patch.dict(SourceManager._source_data_dict["RETRO"], {"url_base": str(tmp_path) + "/"}):
+            with pytest.raises(RuntimeError, match="Retrospective data file not found"):
+                sm.derive_source(t0, None, "RETRO")
+
+    def test_derive_source_retro_http_checks_exact_hour_only(self, temp_cache_dir):
+        """Unlike operational forecasts, RETRO does not walk backward through cycles--
+        it should issue exactly one HEAD request for the exact requested hour."""
+        SingletonMeta._instances.clear()
+        SourceManager._source_cache.clear()
+        sm = SourceManager(str(temp_cache_dir))
+
+        t0 = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        mock_response = MagicMock()
+        mock_response.getcode.return_value = 200
+        mock_response.__enter__.return_value = mock_response
+        mock_response.__exit__.return_value = False
+
+        with patch('copycatbmi.source_manager.urlopen', return_value=mock_response) as mock_urlopen:
+            source = sm.derive_source(t0, None, "RETRO")
+
+        assert mock_urlopen.call_count == 1
+        assert source.t0_fnum == 0
+        assert "20210101000" in source.base_url.geturl()
+
+    def test_derive_source_retro_http_404_raises_without_retry_loop(self, temp_cache_dir):
+        """A 404 for the exact requested hour should fail immediately (no backward search)."""
+        SingletonMeta._instances.clear()
+        SourceManager._source_cache.clear()
+        sm = SourceManager(str(temp_cache_dir))
+
+        t0 = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        with patch('copycatbmi.source_manager.urlopen') as mock_urlopen:
+            mock_urlopen.side_effect = HTTPError(url='http://example.org/', code=404, msg="Mock Not Found", hdrs=[], fp=None)
+
+            with pytest.raises(RuntimeError, match="Retrospective data file not found"):
+                sm.derive_source(t0, None, "RETRO")
+
+        assert mock_urlopen.call_count == 1
+
+    def test_derive_source_retro_json_cache_roundtrip(self, temp_cache_dir, tmp_path):
+        """The leader-written source.json can be reloaded into an equivalent Source
+        (regression check for mismatched keys / unparsed init_datetime)."""
+        SingletonMeta._instances.clear()
+        SourceManager._source_cache.clear()
+        sm = SourceManager(str(temp_cache_dir))
+
+        t0 = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        self._touch_retro_file(tmp_path, t0)
+
+        with patch.dict(SourceManager._source_data_dict["RETRO"], {"url_base": str(tmp_path) + "/"}):
+            sm.derive_source(t0, None, "RETRO")
+
+        psource = temp_cache_dir / "source.json"
+        assert psource.exists()
+
+        source_dict = json.loads(psource.read_text())
+        source_dict["init_datetime"] = datetime.fromisoformat(source_dict["init_datetime"])
+        reconstructed = Source(**source_dict)
+
+        assert reconstructed.t0_fnum == 0
+        next_hour = reconstructed.get_source_for_t(3600)
+        assert "2021010101" in str(next_hour.base)
+
+
+class TestRetrospectiveSourceGetSourceForT:
+    """Tests for Source.get_source_for_t with a retrospective-style template,
+    exercised directly (no filesystem/network access needed)."""
+
+    RETRO_TEMPLATE = SourceManager._source_data_dict["RETRO"]["path_template"]
+
+    def _make_retro_source(self, init_dt: datetime, url_root: str = "https://example.com/retro/") -> Source:
+        relative = self.RETRO_TEMPLATE.format(
+            forecast_year=init_dt.year, forecast_month=init_dt.month,
+            forecast_day=init_dt.day, forecast_hourz=init_dt.hour,
+        )
+        parsed = urlparse(url_root + relative)
+        return Source(
+            base=parsed.path,
+            base_url=parsed,
+            t0_fnum=0,
+            variable_template_map={"streamflow": self.RETRO_TEMPLATE},
+            init_datetime=init_dt,
+            url_root=url_root,
+        )
+
+    def test_next_hour(self):
+        src = self._make_retro_source(datetime(2021, 6, 15, 10, 0, 0, tzinfo=timezone.utc))
+        nxt = src.get_source_for_t(3600)
+        assert "2021061511" in str(nxt.base)
+
+    def test_day_rollover(self):
+        src = self._make_retro_source(datetime(2021, 1, 1, 23, 0, 0, tzinfo=timezone.utc))
+        nxt = src.get_source_for_t(3600)
+        assert "2021010200" in str(nxt.base)
+
+    def test_year_rollover_changes_folder(self):
+        src = self._make_retro_source(datetime(2021, 12, 31, 23, 0, 0, tzinfo=timezone.utc))
+        nxt = src.get_source_for_t(3600)
+        assert "/2022/" in str(nxt.base).replace("\\", "/")
+        assert "2022010100" in str(nxt.base)
+
+    def test_url_root_is_preserved_across_timesteps(self):
+        src = self._make_retro_source(datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+        nxt = src.get_source_for_t(3600)
+        assert nxt.base_url.geturl().startswith("https://example.com/retro/")
+        assert nxt.url_root == src.url_root
+
+    def test_seconds_are_converted_to_hours(self):
+        """tN passed to get_source_for_t is in seconds, not hours."""
+        src = self._make_retro_source(datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+        one_hour = src.get_source_for_t(3600)
+        half_hour = src.get_source_for_t(1800)
+        assert half_hour.base == src.base  # rounds down, still hour 0
+        assert one_hour.base != src.base
+
+
+class TestSourceCacheKeyRegression:
+    """Regression tests for Source.cache_key not discarding cache_dir for absolute paths."""
+
+    def test_cache_key_has_no_leading_slash(self):
+        source = Source("/national-water-model/nwm.20210101/nwm.t00z.file.nc", "https://example.com/national-water-model/nwm.20210101/nwm.t00z.file.nc", 0)
+        assert not source.cache_key.startswith('/')
+
+    def test_cache_key_joins_under_cache_dir(self, tmp_path):
+        source = Source("/national-water-model/nwm.20210101/nwm.t00z.file.nc", "https://example.com/national-water-model/nwm.20210101/nwm.t00z.file.nc", 0)
+        joined = tmp_path / source.cache_key
+        assert joined.parent == tmp_path
 
 
 #TODO: This test isn't working with arithmetic on mock objects, but is worth testing--fix!
